@@ -27,10 +27,6 @@
     keywordstyle=\color{blue}\bfseries,
     stringstyle=\color{red},
     commentstyle=\color{gray}\itshape,
-    numbers=left,
-    numberstyle=\tiny,
-    stepnumber=1,
-    numbersep=5pt,
     backgroundcolor=\color{white},
     showspaces=false,
     showstringspaces=false,
@@ -197,171 +193,462 @@ a_i u_{i-1,j}^{(k+1)} + c_i u_{i,j}^{(k+1)} + b_i u_{i+1,j}^{(k+1)} = F(u_{i,j-1
 \section{Текст программы}
 
 \begin{lstlisting}
+// fn.h
+#pragma once
 #include <iostream>
 #include <vector>
+#include <fstream>
 #include <cmath>
-#include <iomanip>
-#include <algorithm>
+#include <functional>
 
-using namespace std;
-
-// Параметры задачи
-struct Params {
-    double lambda = 1.0;
-    double gamma = 1.0;
-    double beta = 2.0;
+struct area_element_t {
+    int func_number;
+    int x1, y1, x2, y2;
+    area_element_t() {}
+    area_element_t(int _func_number, int _x1, int _y1, int _x2, int _y2) {
+        func_number = _func_number; x1 = _x1; y1 = _y1; x2 = _x2; y2 = _y2;
+    }
 };
 
-// Типы узлов
-enum NodeType { FICTITIOUS = 0, INTERNAL = 1, BOUNDARY_1 = 2, BOUNDARY_3 = 3 };
+struct area_t {
+    std::vector<double> x_lines, y_lines;
+    std::vector<int> x_indices, y_indices;
+    std::vector<area_element_t> elems;
+};
 
-// Точное решение и правая часть
-double u_exact(double x, double y) { return sin(x + y); }
-double f_func(double x, double y, Params p) { 
-    return p.lambda * 2.0 * sin(x + y) + p.gamma * u_exact(x, y); 
+struct parameters_t {
+    double lambda, gamma, beta; 
+};
+
+struct grid_t {
+    std::vector<double> x, y;
+};
+
+struct slae_t {
+    std::vector<double> u1, u2, di, l4, l5, b;
+    std::vector<int> ig;
+};
+
+struct functionsBC {
+    std::function<double(double, double)> u_exact = [](double x, double y) { return 2.0 * x + 3.0 * y + 1.0; };
+    std::function<double(double, double, parameters_t)> f_rhs = [](double x, double y, parameters_t p) { 
+        return p.gamma * (2.0 * x + 3.0 * y + 1.0); 
+    };
+    std::vector<std::function<double(double, double)>> firstBC = { [](double x, double y) { return 2.0 * x + 3.0 * y + 1.0; } };
+    std::vector<std::function<double(double, double)>> thirdBC = { [](double x, double y) { return 2.0 * x + 3.0 * y + 1.0; } };
+};
+
+void read_area(std::string filename, area_t &area);
+void read_params(std::string filename, parameters_t &params);
+void read_grid(std::string filename, area_t &area, grid_t &grid);
+
+int calcSubareaNumber(area_t &area, int i, int j, int &l);
+bool isDummyNode(area_t &area, int i, int j);
+
+void createSLAE(slae_t &slae, grid_t &grid, area_t &area, parameters_t &params, functionsBC &func);
+void applyBoundaryConds(area_t &area, grid_t &g, slae_t &slae, parameters_t &par, functionsBC &func);
+void clearDummyNodes(slae_t &slae, area_t &area, int x_n, int y_n);
+
+double calcNorm(const std::vector<double> &b);
+double calcDiscrepancy(const slae_t &slae, const std::vector<double> &u);
+void method_BlockRelaxation(slae_t &slae, std::vector<double> &u, std::vector<double> &uk, double eps, int maxIter, grid_t &grid);
+
+void output(area_t &area, std::vector<double> &u, grid_t &grid, functionsBC &func, std::string filename);
+
+// input.cpp
+#include "fn.h"
+
+void read_area(std::string filename, area_t &area) {
+    std::ifstream in(filename);
+    int count = 0;
+
+    in >> count;
+    area.x_lines.resize(count);
+    for (int i = 0; i < count; i++) in >> area.x_lines[i];
+
+    in >> count;
+    area.y_lines.resize(count);
+    for (int i = 0; i < count; i++) in >> area.y_lines[i];
+
+    in >> count;
+    area.elems.resize(count);
+    for (int l = 0; l < count; l++) {
+        in >> area.elems[l].func_number >> area.elems[l].x1 >> area.elems[l].x2 >> area.elems[l].y1 >> area.elems[l].y2;
+        area.elems[l].x1--; area.elems[l].x2--; area.elems[l].y1--; area.elems[l].y2--;
+    }
+    in.close();
 }
 
-// Метод прогонки
-void tridiagonal_solve(const vector<double>& a, const vector<double>& c, 
-                       const vector<double>& b, const vector<double>& f, vector<double>& x) {
+void read_params(std::string filename, parameters_t &params) {
+    std::ifstream in(filename);
+    in >> params.lambda >> params.gamma >> params.beta;
+    in.close();
+}
+
+void read_grid(std::string filename, area_t &area, grid_t &grid) {
+    std::ifstream fin(filename);
+    int nX = area.x_lines.size() - 1;
+    int nY = area.y_lines.size() - 1;
+    area.x_indices.resize(nX + 1);
+    area.y_indices.resize(nY + 1);
+    area.x_indices[0] = 0;
+    area.y_indices[0] = 0;
+
+    int nXk = 0;
+    grid.x.resize(1, area.x_lines[0]);
+    for (int i = 0, j = 1; i < nX; i++, j++) {
+        int countInterval = 0;
+        double q = 0, step = 0;
+        fin >> countInterval >> q;
+        nXk += countInterval;
+        grid.x.resize(nXk + 1);
+
+        if (q != 1) {
+            double sumProgression = (pow(q, countInterval) - 1.0) / (q - 1.0);
+            step = (area.x_lines[i + 1] - area.x_lines[i]) / sumProgression;
+            int jk = 1;
+            for (; j < nXk; j++, jk++)
+                grid.x[j] = area.x_lines[i] + step * (pow(q, jk) - 1.0) / (q - 1.0);
+        } else {
+            step = (area.x_lines[i + 1] - area.x_lines[i]) / countInterval;
+            int jk = 1;
+            for (; j < nXk; j++, jk++)
+                grid.x[j] = area.x_lines[i] + step * jk;
+        }
+        grid.x[j] = area.x_lines[i + 1];
+        area.x_indices[i + 1] = j;
+    }
+
+    int nYk = 0;
+    grid.y.resize(1, area.y_lines[0]);
+    for (int i = 0, j = 1; i < nY; i++, j++) {
+        int countInterval = 0;
+        double q = 0, step = 0;
+        fin >> countInterval >> q;
+        nYk += countInterval;
+        grid.y.resize(nYk + 1);
+
+        if (q != 1) {
+            double sumProgression = (pow(q, countInterval) - 1.0) / (q - 1.0);
+            step = (area.y_lines[i + 1] - area.y_lines[i]) / sumProgression;
+            int jk = 1;
+            for (; j < nYk; j++, jk++)
+                grid.y[j] = area.y_lines[i] + step * (pow(q, jk) - 1.0) / (q - 1.0);
+        } else {
+            step = (area.y_lines[i + 1] - area.y_lines[i]) / countInterval;
+            int jk = 1;
+            for (; j < nYk; j++, jk++)
+                grid.y[j] = area.y_lines[i] + step * jk;
+        }
+        grid.y[j] = area.y_lines[i + 1];
+        area.y_indices[i + 1] = j;
+    }
+    fin.close();
+}
+
+// fdm.cpp
+#include "fn.h"
+
+bool isDummyNode(area_t &area, int i, int j) {
+    int L = area.elems.size();
+    for (int k = 0; k < L; k++) {
+        int mx0 = area.x_indices[area.elems[k].x1], mx1 = area.x_indices[area.elems[k].x2];
+        int my0 = area.y_indices[area.elems[k].y1], my1 = area.y_indices[area.elems[k].y2];
+        if (i >= mx0 && i <= mx1 && j >= my0 && j <= my1) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void createSLAE(slae_t &slae, grid_t &grid, area_t &area, parameters_t &params, functionsBC &func) {
+    int n_x = grid.x.size(), n_y = grid.y.size();
+    int n = n_x * n_y;
+
+    slae.ig = { -n_x, -1, 1, n_x };
+    slae.u1.assign(n - n_x, 0.0);
+    slae.u2.assign(n - 1, 0.0);
+    slae.di.assign(n, 0.0);
+    slae.l4.assign(n - 1, 0.0);
+    slae.l5.assign(n - n_x, 0.0);
+    slae.b.assign(n, 0.0);
+
+    // Заполнение внутренних узлов 5-точечным шаблоном
+    for (int j = 1; j < n_y - 1; j++) {
+        for (int i = 1; i < n_x - 1; i++) {
+            if (!isDummyNode(area, i, j)) {
+                int k = j * n_x + i;
+                double hx1 = grid.x[i] - grid.x[i - 1];
+                double hx2 = grid.x[i + 1] - grid.x[i];
+                double hy1 = grid.y[j] - grid.y[j - 1];
+                double hy2 = grid.y[j + 1] - grid.y[j];
+
+                slae.di[k] = params.lambda * (2.0 / (hx1 * hx2) + 2.0 / (hy1 * hy2)) + params.gamma;
+                slae.u2[k - 1] = -params.lambda * 2.0 / (hx1 * (hx1 + hx2));   // левый
+                slae.l4[k]     = -params.lambda * 2.0 / (hx2 * (hx1 + hx2));   // правый
+                slae.u1[k - n_x]= -params.lambda * 2.0 / (hy1 * (hy1 + hy2));  // нижний
+                slae.l5[k]     = -params.lambda * 2.0 / (hy2 * (hy1 + hy2));   // верхний
+                
+                slae.b[k] = func.f_rhs(grid.x[i], grid.y[j], params);
+            }
+        }
+    }
+}
+
+void applyBoundaryConds(area_t &area, grid_t &grid, slae_t &slae, parameters_t &par, functionsBC &func) {
+    int n_x = grid.x.size(), n_y = grid.y.size();
+    double EPS = 1e-7;
+
+    double cap_x_min = area.x_lines[0], cap_x_max = area.x_lines[3];
+    double cap_y_min = area.y_lines[1], cap_y_max = area.y_lines[2];
+    double base_x_min = area.x_lines[1], base_x_max = area.x_lines[2];
+    double base_y_min = area.y_lines[0], base_y_max = area.y_lines[1];
+
+    for (int j = 0; j < n_y; j++) {
+        for (int i = 0; i < n_x; i++) {
+            double x = grid.x[i], y = grid.y[j];
+            int k = j * n_x + i;
+
+            if (isDummyNode(area, i, j)) continue;
+
+            bool top_bound = (abs(y - cap_y_max) < EPS);
+            bool bottom_bound = (abs(y - base_y_min) < EPS);
+            bool left_cap = (abs(x - cap_x_min) < EPS && y >= cap_y_min - EPS);
+            bool right_cap = (abs(x - cap_x_max) < EPS && y >= cap_y_min - EPS);
+            bool left_base = (abs(x - base_x_min) < EPS && y <= base_y_max + EPS);
+            bool right_base = (abs(x - base_x_max) < EPS && y <= base_y_max + EPS);
+            bool inner_corners = (abs(y - cap_y_min) < EPS && (x < base_x_min - EPS || x > base_x_max + EPS));
+
+            if (left_cap || right_cap || left_base || right_base || inner_corners) {
+                slae.di[k] = 1.0;
+                if (k - n_x >= 0) slae.u1[k - n_x] = 0;
+                if (k - 1 >= 0) slae.u2[k - 1] = 0;
+                if (k < (int)slae.l4.size()) slae.l4[k] = 0;
+                if (k < (int)slae.l5.size()) slae.l5[k] = 0;
+                slae.b[k] = func.firstBC[0](x, y);
+            } else if (top_bound) {
+                double hx1 = grid.x[i] - grid.x[i - 1];
+                double hx2 = grid.x[i + 1] - grid.x[i];
+                double hy = grid.y[j] - grid.y[j - 1];
+                
+                slae.di[k] = par.lambda * (2.0 / (hx1 * hx2) + 2.0 / (hy * hy)) + par.gamma + 2.0 * par.beta / hy;
+                if (k - 1 >= 0) slae.u2[k - 1] = -par.lambda * 2.0 / (hx1 * (hx1 + hx2));
+                if (k < (int)slae.l4.size()) slae.l4[k] = -par.lambda * 2.0 / (hx2 * (hx1 + hx2));
+                if (k - n_x >= 0) slae.u1[k - n_x] = -par.lambda * 2.0 / (hy * hy);
+                
+                slae.b[k] = func.f_rhs(x, y, par) + 2.0 * func.thirdBC[0](x, y) / hy;
+                if (k < (int)slae.l5.size()) slae.l5[k] = 0;
+            } else if (bottom_bound) {
+                double hx1 = grid.x[i] - grid.x[i - 1];
+                double hx2 = grid.x[i + 1] - grid.x[i];
+                double hy = grid.y[j + 1] - grid.y[j];
+                
+                slae.di[k] = par.lambda * (2.0 / (hx1 * hx2) + 2.0 / (hy * hy)) + par.gamma + 2.0 * par.beta / hy;
+                if (k - 1 >= 0) slae.u2[k - 1] = -par.lambda * 2.0 / (hx1 * (hx1 + hx2));
+                if (k < (int)slae.l4.size()) slae.l4[k] = -par.lambda * 2.0 / (hx2 * (hx1 + hx2));
+                if (k < (int)slae.l5.size()) slae.l5[k] = -par.lambda * 2.0 / (hy * hy);
+                
+                slae.b[k] = func.f_rhs(x, y, par) + 2.0 * (func.thirdBC.size() > 1 ? func.thirdBC[1](x, y) : func.thirdBC[0](x, y)) / hy;
+                if (k - n_x >= 0) slae.u1[k - n_x] = 0;
+            }
+        }
+    }
+}
+
+void clearDummyNodes(slae_t &slae, area_t &area, int n_x, int n_y) {
+    for (int j = 0; j < n_y; j++) {
+        for (int i = 0; i < n_x; i++) {
+            if (isDummyNode(area, i, j)) {
+                int k = j * n_x + i;
+                slae.di[k] = 1.0;
+                if (k - n_x >= 0) slae.u1[k - n_x] = 0;
+                if (k - 1 >= 0) slae.u2[k - 1] = 0;
+                if (k < (int)slae.l4.size()) slae.l4[k] = 0;
+                if (k < (int)slae.l5.size()) slae.l5[k] = 0;
+                slae.b[k] = 0.0;
+            }
+        }
+    }
+}
+
+// sor.cpp
+#include "fn.h"
+#include <iomanip>
+
+double calcNorm(const std::vector<double> &b) {
+    double sum = 0;
+    for (double val : b) sum += val * val;
+    return sqrt(sum);
+}
+
+double calcDiscrepancy(const slae_t &slae, const std::vector<double> &u) {
+    double res = 0;
+    int n = slae.di.size();
+    for (int i = 0; i < n; i++) {
+        double sum = slae.di[i] * u[i];
+        if (i + slae.ig[0] >= 0) sum += slae.u1[i + slae.ig[0]] * u[i + slae.ig[0]];
+        if (i + slae.ig[1] >= 0) sum += slae.u2[i + slae.ig[1]] * u[i + slae.ig[1]];
+        if (i + slae.ig[2] < n) sum += slae.l4[i] * u[i + slae.ig[2]];
+        if (i + slae.ig[3] < n) sum += slae.l5[i] * u[i + slae.ig[3]];
+        res += (slae.b[i] - sum) * (slae.b[i] - sum);
+    }
+    return res;
+}
+
+void tridiagonal_solve(const std::vector<double>& a, const std::vector<double>& c, 
+                       const std::vector<double>& b, const std::vector<double>& f, std::vector<double>& x) {
     int n = f.size();
-    vector<double> alpha(n, 0.0), beta(n, 0.0);
-    
+    std::vector<double> alpha(n, 0.0), beta(n, 0.0);
     alpha[0] = -b[0] / c[0];
     beta[0] = f[0] / c[0];
-    
     for (int i = 1; i < n - 1; ++i) {
         double denom = c[i] + a[i] * alpha[i - 1];
         alpha[i] = -b[i] / denom;
         beta[i] = (f[i] - a[i] * beta[i - 1]) / denom;
     }
-    
     x[n - 1] = (f[n - 1] - a[n - 1] * beta[n - 2]) / (c[n - 1] + a[n - 1] * alpha[n - 2]);
     for (int i = n - 2; i >= 0; --i) {
         x[i] = alpha[i] * x[i + 1] + beta[i];
     }
 }
 
-// Блочная релаксация
-void block_relaxation(const vector<double>& diMain, const vector<double>& diLower, 
-                      const vector<double>& diUpper, const vector<double>& diFarLower, 
-                      const vector<double>& diFarUpper, const vector<double>& b, 
-                      vector<double>& u, int Nx, int Ny, double eps = 1e-9) {
-    int N = Nx * Ny;
-    vector<double> u_new = u;
-    double max_diff;
+void method_BlockRelaxation(slae_t &slae, std::vector<double> &u, std::vector<double> &uk, double eps, int maxIter, grid_t &grid) {
+    int n_x = grid.x.size(), n_y = grid.y.size();
+    int n = slae.di.size();
+    
+    u.assign(n, 0.0);
+    uk = u;
+    
+    double norm = calcNorm(slae.b);
+    double res = 1.0;
     int iter = 0;
     
-    do {
-        max_diff = 0.0;
-        for (int j = 0; j < Ny; ++j) {
-            vector<double> a(Nx, 0.0), c(Nx, 0.0), b_sub(Nx, 0.0), f(Nx, 0.0), x(Nx, 0.0);
-            for (int i = 0; i < Nx; ++i) {
-                int k = j * Nx + i;
-                c[i] = diMain[k];
-                if (i > 0) a[i] = diLower[k];
-                if (i < Nx - 1) b_sub[i] = diUpper[k];
+    while (res > eps && iter < maxIter) {
+        for (int j = 0; j < n_y; ++j) {
+            std::vector<double> a(n_x, 0.0), c(n_x, 0.0), b_sub(n_x, 0.0), f(n_x, 0.0), x_line(n_x, 0.0);
+            
+            for (int i = 0; i < n_x; ++i) {
+                int k = j * n_x + i;
+                c[i] = slae.di[k];
+                if (i > 0) a[i] = slae.u2[k - 1]; 
+                if (i < n_x - 1) b_sub[i] = slae.l4[k];
                 
-                f[i] = b[k];
-                if (j > 0) f[i] -= diFarLower[k] * u_new[k - Nx];
-                if (j < Ny - 1) f[i] -= diFarUpper[k] * u[k + Nx];
+                f[i] = slae.b[k];
+                if (j > 0) f[i] -= slae.u1[k - n_x] * u[k - n_x];
+                if (j < n_y - 1) f[i] -= slae.l5[k] * uk[k + n_x]; 
             }
-            tridiagonal_solve(a, c, b_sub, f, x);
-            for (int i = 0; i < Nx; ++i) {
-                int k = j * Nx + i;
-                max_diff = max(max_diff, abs(x[i] - u[k]));
-                u_new[k] = x[i];
+            
+            tridiagonal_solve(a, c, b_sub, f, x_line);
+            
+            for (int i = 0; i < n_x; ++i) {
+                u[j * n_x + i] = x_line[i];
             }
         }
-        u = u_new;
+        
+        res = sqrt(calcDiscrepancy(slae, u)) / norm;
+        uk = u;
         iter++;
-    } while (max_diff > eps && iter < 10000);
+    }
+}
+
+void output(area_t &area, std::vector<double> &u, grid_t &g, functionsBC &func, std::string filename) {
+    auto &x = g.x, &y = g.y;
+    const int n_x = x.size(), n_y = y.size();
+    std::ofstream fout(filename);
+    fout << "N\tx\ty\tu\tu*\t|u - u*|\n";
+    for (int j = 0; j < n_y; j++) {
+        for (int i = 0; i < n_x; i++) {
+            int k = j * n_x + i;
+            if (!isDummyNode(area, i, j)) {
+                double exact = func.u_exact(x[i], y[j]);
+                double err = std::abs(u[k] - exact);
+                fout << k << "\t" << x[i] << "\t" << y[j] << "\t" 
+                     << std::scientific << u[k] << "\t" << exact << "\t" << err << "\n";
+            }
+        }
+    }
+    fout.close();
+}
+
+// main.cpp
+#include <iostream>
+#include <vector>
+#include <fstream>
+#include <cmath>
+#include <iomanip>
+#include <string>
+#include "fn.h"
+
+void write_grid(int N) {
+    std::ofstream out("in/grid.txt");
+    out << N << " 1 " << N << " 1 " << N << " 1\n";
+    out << (int)(N * 1.5) << " 1 " << N << " 1\n";
+    out.close();
+}
+
+double run_test(functionsBC func, area_t &area, parameters_t &params, int N, double eps, int maxIter, std::string out_filename) {
+    write_grid(N);
+    grid_t grid;
+    read_grid("in/grid.txt", area, grid);
+    slae_t slae;
+    std::vector<double> u, uk;
+    createSLAE(slae, grid, area, params, func);
+    applyBoundaryConds(area, grid, slae, params, func);
+    clearDummyNodes(slae, area, grid.x.size(), grid.y.size());
+    method_BlockRelaxation(slae, u, uk, eps, maxIter, grid);
+    output(area, u, grid, func, out_filename);
+    double max_err = 0;
+    int n_x = grid.x.size(), n_y = grid.y.size();
+    for (int j = 0; j < n_y; j++) {
+        for (int i = 0; i < n_x; i++) {
+            if (!isDummyNode(area, i, j)) {
+                int k = j * n_x + i;
+                double exact = func.u_exact(grid.x[i], grid.y[j]);
+                max_err = std::max(max_err, std::abs(u[k] - exact));
+            }
+        }
+    }
+    return max_err;
 }
 
 int main() {
-    Params p;
-    // Геометрия Т-области
-    double cap_x_min = 0.0, cap_x_max = 6.0, cap_y_min = 3.0, cap_y_max = 5.0;
-    double base_x_min = 2.0, base_x_max = 4.0, base_y_min = 0.0, base_y_max = 3.0;
+    const double eps = 1e-13;
+    const int maxIter = 50000;
+    area_t area;
+    parameters_t params;
+    read_area("in/area.txt", area);
+    params.lambda = 1.0; params.gamma = 1.0; params.beta = 2.0;
 
-    int Nx = 40, Ny = 40;
-    double hx = 6.0 / (Nx - 1), hy = 5.0 / (Ny - 1);
-    int N = Nx * Ny;
-    
-    vector<NodeType> node_types(N, FICTITIOUS);
-    
-    // Разметка узлов
-    for (int j = 0; j < Ny; ++j) {
-        for (int i = 0; i < Nx; ++i) {
-            double x = i * hx;
-            double y = j * hy;
-            int k = j * Nx + i;
-            
-            bool in_cap = (x >= cap_x_min - 1e-7 && x <= cap_x_max + 1e-7 && y >= cap_y_min - 1e-7 && y <= cap_y_max + 1e-7);
-            bool in_base = (x >= base_x_min - 1e-7 && x <= base_x_max + 1e-7 && y >= base_y_min - 1e-7 && y <= base_y_max + 1e-7);
+    functionsBC f_lin;
+    f_lin.u_exact = [](double x, double y) { return 2.0 * x + 3.0 * y + 1.0; };
+    f_lin.f_rhs = [](double x, double y, parameters_t p) { return p.gamma * (2.0 * x + 3.0 * y + 1.0); };
+    f_lin.firstBC = { [](double x, double y) { return 2.0 * x + 3.0 * y + 1.0; } };
+    f_lin.thirdBC = { 
+        [](double x, double y) { return 1.0 * (3.0) + 2.0 * (2.0 * x + 3.0 * y + 1.0); },
+        [](double x, double y) { return 1.0 * (-3.0) + 2.0 * (2.0 * x + 3.0 * y + 1.0); }
+    };
 
-            if (in_cap || in_base) {
-                if (abs(y - cap_y_max) < 1e-7 || abs(y - base_y_min) < 1e-7) {
-                    node_types[k] = BOUNDARY_3; // 3-й род верх и низ
-                } else if ((abs(x - cap_x_min) < 1e-7 && y >= cap_y_min) || (abs(x - cap_x_max) < 1e-7 && y >= cap_y_min) ||
-                           (abs(x - base_x_min) < 1e-7 && y <= base_y_max) || (abs(x - base_x_max) < 1e-7 && y <= base_y_max) ||
-                           (abs(y - cap_y_min) < 1e-7 && (x <= base_x_min + 1e-7 || x >= base_x_max - 1e-7))) {
-                    node_types[k] = BOUNDARY_1;
-                } else {
-                    node_types[k] = INTERNAL;
-                }
-            }
-        }
-    }
+    functionsBC f_quad;
+    f_quad.u_exact = [](double x, double y) { return x * x + y * y; };
+    f_quad.f_rhs = [](double x, double y, parameters_t p) { return -p.lambda * 4.0 + p.gamma * (x * x + y * y); };
+    f_quad.firstBC = { [](double x, double y) { return x * x + y * y; } };
+    f_quad.thirdBC = { 
+        [](double x, double y) { return 1.0 * (2.0 * y) + 2.0 * (x * x + y * y); },
+        [](double x, double y) { return 1.0 * (-2.0 * y) + 2.0 * (x * x + y * y); }
+    };
 
-    // Сборка СЛАУ
-    vector<double> diMain(N, 0.0), diLower(N, 0.0), diUpper(N, 0.0), diFarLower(N, 0.0), diFarUpper(N, 0.0), b(N, 0.0);
-    
-    for (int j = 0; j < Ny; ++j) {
-        for (int i = 0; i < Nx; ++i) {
-            int k = j * Nx + i;
-            double x = i * hx, y = j * hy;
+    functionsBC f_sin;
+    f_sin.u_exact = [](double x, double y) { return sin(x + y); };
+    f_sin.f_rhs = [](double x, double y, parameters_t p) { return p.lambda * 2.0 * sin(x + y) + p.gamma * sin(x + y); };
+    f_sin.firstBC = { [](double x, double y) { return sin(x + y); } };
+    f_sin.thirdBC = { 
+        [](double x, double y) { return 1.0 * (cos(x + y)) + 2.0 * (sin(x + y)); },
+        [](double x, double y) { return 1.0 * (-cos(x + y)) + 2.0 * (sin(x + y)); }
+    };
 
-            if (node_types[k] == FICTITIOUS) {
-                diMain[k] = 1.0; b[k] = 0.0;
-            } else if (node_types[k] == BOUNDARY_1) {
-                diMain[k] = 1.0; b[k] = u_exact(x, y);
-            } else if (node_types[k] == BOUNDARY_3) {
-                if (abs(y - base_y_min) < 1e-7) { // Низ
-                    diMain[k] = p.lambda / hy + p.beta;
-                    diFarUpper[k] = -p.lambda / hy;
-                    b[k] = p.beta * u_exact(x, y); // Упрощенно u_beta = u_exact
-                } else { // Верх
-                    diMain[k] = p.lambda / hy + p.beta;
-                    diFarLower[k] = -p.lambda / hy;
-                    b[k] = p.beta * u_exact(x, y);
-                }
-            } else if (node_types[k] == INTERNAL) {
-                diMain[k] = -(2.0 * p.lambda / (hx * hx) + 2.0 * p.lambda / (hy * hy)) + p.gamma;
-                diLower[k] = p.lambda / (hx * hx);
-                diUpper[k] = p.lambda / (hx * hx);
-                diFarLower[k] = p.lambda / (hy * hy);
-                diFarUpper[k] = p.lambda / (hy * hy);
-                b[k] = -f_func(x, y, p);
-            }
-        }
-    }
-
-    vector<double> u(N, 0.0);
-    block_relaxation(diMain, diLower, diUpper, diFarLower, diFarUpper, b, u, Nx, Ny);
-
-    // Подсчет ошибки
-    double max_err = 0.0;
-    for (int j = 0; j < Ny; ++j) {
-        for (int i = 0; i < Nx; ++i) {
-            int k = j * Nx + i;
-            if (node_types[k] != FICTITIOUS) {
-                max_err = max(max_err, abs(u[k] - u_exact(i * hx, j * hy)));
-            }
-        }
-    }
-    cout << "Grid: " << Nx << "x" << Ny << ", Max Error: " << max_err << endl;
-
+    run_test(f_lin, area, params, 10, eps, maxIter, "out/out_linear.txt");
+    run_test(f_quad, area, params, 10, eps, maxIter, "out/out_quad.txt");
+    run_test(f_sin, area, params, 10, eps, maxIter, "out/out_sin_10.txt");
     return 0;
 }
 \end{lstlisting}
