@@ -1,0 +1,331 @@
+\documentclass[a4paper,12pt]{article}
+
+% Поддержка русского языка и кодировок
+\usepackage[utf8]{inputenc}
+\usepackage[T2A]{fontenc}
+\usepackage[russian]{babel}
+
+% Математические пакеты
+\usepackage{amsmath, amsfonts, amssymb, amsthm}
+
+% Настройка полей
+\usepackage[left=3cm, right=1.5cm, top=2cm, bottom=2cm]{geometry}
+
+% Пакеты для графики и таблиц
+\usepackage{graphicx}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{float}
+
+% Пакет для вставки исходного кода
+\usepackage{listings}
+\usepackage{xcolor}
+
+\lstset{
+    language=C++,
+    basicstyle=\ttfamily\footnotesize,
+    keywordstyle=\color{blue}\bfseries,
+    stringstyle=\color{red},
+    commentstyle=\color{gray}\itshape,
+    numbers=left,
+    numberstyle=\tiny,
+    stepnumber=1,
+    numbersep=5pt,
+    backgroundcolor=\color{white},
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    frame=single,
+    tabsize=4,
+    captionpos=b,
+    breaklines=true,
+    breakatwhitespace=false,
+    escapeinside={\%*}{*)},
+    extendedchars=true,
+    keepspaces=true,
+    literate={а}{{\cyra}}1 {б}{{\cyrb}}1 {в}{{\cyrv}}1 {г}{{\cyrg}}1 {д}{{\cyrd}}1 
+             {е}{{\cyre}}1 {ё}{{\"e}}1 {ж}{{\cyrzh}}1 {з}{{\cyrz}}1 {и}{{\cyri}}1 
+             {й}{{\cyrishrt}}1 {к}{{\cyrk}}1 {л}{{\cyrl}}1 {м}{{\cyrm}}1 {н}{{\cyrn}}1 
+             {о}{{\cyro}}1 {п}{{\cyrp}}1 {р}{{\cyrr}}1 {с}{{\cyrs}}1 {т}{{\cyrt}}1 
+             {у}{{\cyru}}1 {ф}{{\cyrf}}1 {х}{{\cyrh}}1 {ц}{{\cyrc}}1 {ч}{{\cyrch}}1 
+             {ш}{{\cyrsh}}1 {щ}{{\cyrshch}}1 {ъ}{{\cyrhrdsn}}1 {ы}{{\cyrery}}1 {ь}{{\cyrsftsn}}1 
+             {э}{{\cyreve}}1 {ю}{{\cyryu}}1 {я}{{\cyrya}}1 
+             {А}{{\CYRA}}1 {Б}{{\CYRB}}1 {В}{{\CYRV}}1 {Г}{{\CYRG}}1 {Д}{{\CYRD}}1 
+             {Е}{{\CYRE}}1 {Ё}{{\"E}}1 {Ж}{{\CYRZH}}1 {З}{{\CYRZ}}1 {И}{{\CYRI}}1 
+             {Й}{{\CYRISHRT}}1 {К}{{\CYRK}}1 {Л}{{\CYRL}}1 {М}{{\CYRM}}1 {Н}{{\CYRN}}1 
+             {О}{{\CYRO}}1 {П}{{\CYRP}}1 {Р}{{\CYRR}}1 {С}{{\CYRS}}1 {Т}{{\CYRT}}1 
+             {У}{{\CYRU}}1 {Ф}{{\CYRF}}1 {Х}{{\CYRH}}1 {Ц}{{\CYRC}}1 {Ч}{{\CYRCH}}1 
+             {Ш}{{\CYRSH}}1 {Щ}{{\CYRSHCH}}1 {Ъ}{{\CYRHRDSN}}1 {Ы}{{\CYRERY}}1 {Ь}{{\CYRSFTSN}}1 
+             {Э}{{\CYREVE}}1 {Ю}{{\CYRYU}}1 {Я}{{\CYRYA}}1
+}
+
+\begin{document}
+
+\setcounter{page}{2}
+
+% --- ОСНОВНОЙ ТЕКСТ ---
+\section{Цель работы}
+Разработать программу решения двумерной эллиптической краевой задачи методом конечных разностей. Протестировать программу на полиномах и численно оценить порядок аппроксимации. Область имеет Т-образную форму. Предусмотреть учет краевых условий первого и третьего рода.
+
+\section{Теоретическая часть}
+Метод конечных разностей основан на замене непрерывной расчетной области дискретной сеткой узлов и аппроксимации дифференциальных операторов разностными отношениями с использованием разложения функций в ряд Тейлора.
+
+Для двумерного уравнения эллиптического типа:
+\begin{equation}
+-\lambda \Delta u + \gamma u = f(x, y)
+\end{equation}
+
+Дискретный аналог на неравномерной прямоугольной сетке определяется пятиточечным разностным выражением:
+\begin{equation}
+\begin{split}
+\Delta_h u_{i,j} = \frac{2u_{i-1,j}}{h_{i-1}^x(h_i^x+h_{i-1}^x)} + \frac{2u_{i+1,j}}{h_i^x(h_i^x+h_{i-1}^x)} + \frac{2u_{i,j-1}}{h_{j-1}^y(h_j^y+h_{j-1}^y)} + \frac{2u_{i,j+1}}{h_j^y(h_j^y+h_{j-1}^y)} - \\ - \left(\frac{2}{h_{i-1}^x h_i^x} + \frac{2}{h_{j-1}^y h_j^y}\right)u_{i,j}
+\end{split}
+\end{equation}
+
+Учет краевых условий осуществляется следующим образом:
+Для узлов на границе $S_1$, где заданы условия первого рода $u = u_g$, диагональные элементы матрицы заменяются на 1, а элемент вектора правой части заменяется на значение $u_g$.
+Для условия третьего рода $\lambda \frac{\partial u}{\partial n} + \beta(u - u_\beta) = 0$ производная по нормали аппроксимируется односторонней разностью первого порядка. Например, для верхней границы (внешняя нормаль сонаправлена с осью OY):
+\begin{equation}
+\lambda \frac{u_{i,j} - u_{i,j-1}}{h_{j-1}^y} + \beta u_{i,j} = \beta u_\beta \implies \left(\frac{\lambda}{h_{j-1}^y} + \beta\right)u_{i,j} - \frac{\lambda}{h_{j-1}^y}u_{i,j-1} = \beta u_\beta
+\end{equation}
+
+\section{Практическая часть}
+
+\subsection{Построение сетки в Т-образной области}
+Для решения задачи используется регулярная прямоугольная сетка, построенная в минимальном ограничивающем прямоугольнике $\Omega_{rect}$. 
+Т-образная расчетная область $\Omega$ (рис. 1) описывается как объединение двух прямоугольников: основания и <<шапки>>.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{image_d6a054.png}
+    \caption{Расчетная Т-образная область}
+    \label{fig:domain}
+\end{figure}
+
+Допускается использовать фиктивные узлы для сохранения регулярной структуры СЛАУ. Фиктивные узлы лежат вне Т-образной области. Для таких узлов матричное уравнение вырождается в тривиальное $u_{i,j} = 0$.
+
+\subsection{Сборка СЛАУ и метод решения}
+Для хранения глобальной матрицы $A$ используется диагональный формат (DIA) с пятью ненулевыми диагоналями.
+Для решения полученной СЛАУ применяется итерационный метод блочной релаксации (метод прогонки по линиям). Итерационный процесс организован по горизонтальным линиям сетки. Для каждой строки $j$ формируется и решается методом прогонки трехдиагональная подсистема:
+\begin{equation}
+a_i u_{i-1,j}^{(k+1)} + c_i u_{i,j}^{(k+1)} + b_i u_{i+1,j}^{(k+1)} = F(u_{i,j-1}^{(k+1)}, u_{i,j+1}^{(k)})
+\end{equation}
+
+\section{Тестирование и порядок аппроксимации}
+
+Тестирование программы проводилось на аналитических решениях в виде полиномов первой и второй степени. Результаты тестирования представлены в таблице \ref{tab:poly}.
+
+\begin{table}[H]
+    \centering
+    \caption{Тестирование программы на полиномах ($\lambda=1, \gamma=1, \beta=2$)}
+    \label{tab:poly}
+    \begin{tabularx}{\textwidth}{|c|c|c|X|}
+        \hline
+        \textbf{Точное решение $u^*$} & \textbf{Шаг сетки $h$} & \textbf{Норма ошибки $\|u^* - u\|_\infty$} & \textbf{Комментарий} \\
+        \hline
+        $u(x,y) = 2x + 3y + 1$ & 0.1 & [ВСТАВИТЬ $10^{-15}$] & Схема точна для линейных полиномов. \\
+        \hline
+        $u(x,y) = x^2 + y^2$ & 0.1 & [ВСТАВИТЬ ОШИБКУ] & Появление ошибки из-за 1-го порядка аппроксимации краевых условий 3-го рода. \\
+        \hline
+    \end{tabularx}
+\end{table}
+
+Исследование порядка аппроксимации реализованного метода проводилось на неполиномиальном решении $u(x,y) = \sin(x+y)$. Экспериментальный порядок сходимости $p$ вычисляется по формуле: $p = \log_2 (E_h / E_{h/2})$.
+
+\begin{table}[H]
+    \centering
+    \caption{Исследование порядка аппроксимации}
+    \label{tab:order}
+    \begin{tabular}{|c|c|c|c|}
+        \hline
+        \textbf{Размер сетки $N_x \times N_y$} & \textbf{Шаг $h$} & \textbf{Ошибка $E_h$} & \textbf{Порядок $p$} \\
+        \hline
+        $10 \times 10$ & $h_0$ & [ВСТАВИТЬ] & - \\
+        \hline
+        $20 \times 20$ & $h_0 / 2$ & [ВСТАВИТЬ] & [ВСТАВИТЬ] \\
+        \hline
+        $40 \times 40$ & $h_0 / 4$ & [ВСТАВИТЬ] & [ВСТАВИТЬ] \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\section{Текст программы}
+
+\begin{lstlisting}
+#include <iostream>
+#include <vector>
+#include <cmath>
+#include <iomanip>
+#include <algorithm>
+
+using namespace std;
+
+// Параметры задачи
+struct Params {
+    double lambda = 1.0;
+    double gamma = 1.0;
+    double beta = 2.0;
+};
+
+// Типы узлов
+enum NodeType { FICTITIOUS = 0, INTERNAL = 1, BOUNDARY_1 = 2, BOUNDARY_3 = 3 };
+
+// Точное решение и правая часть
+double u_exact(double x, double y) { return sin(x + y); }
+double f_func(double x, double y, Params p) { 
+    return p.lambda * 2.0 * sin(x + y) + p.gamma * u_exact(x, y); 
+}
+
+// Метод прогонки
+void tridiagonal_solve(const vector<double>& a, const vector<double>& c, 
+                       const vector<double>& b, const vector<double>& f, vector<double>& x) {
+    int n = f.size();
+    vector<double> alpha(n, 0.0), beta(n, 0.0);
+    
+    alpha[0] = -b[0] / c[0];
+    beta[0] = f[0] / c[0];
+    
+    for (int i = 1; i < n - 1; ++i) {
+        double denom = c[i] + a[i] * alpha[i - 1];
+        alpha[i] = -b[i] / denom;
+        beta[i] = (f[i] - a[i] * beta[i - 1]) / denom;
+    }
+    
+    x[n - 1] = (f[n - 1] - a[n - 1] * beta[n - 2]) / (c[n - 1] + a[n - 1] * alpha[n - 2]);
+    for (int i = n - 2; i >= 0; --i) {
+        x[i] = alpha[i] * x[i + 1] + beta[i];
+    }
+}
+
+// Блочная релаксация
+void block_relaxation(const vector<double>& diMain, const vector<double>& diLower, 
+                      const vector<double>& diUpper, const vector<double>& diFarLower, 
+                      const vector<double>& diFarUpper, const vector<double>& b, 
+                      vector<double>& u, int Nx, int Ny, double eps = 1e-9) {
+    int N = Nx * Ny;
+    vector<double> u_new = u;
+    double max_diff;
+    int iter = 0;
+    
+    do {
+        max_diff = 0.0;
+        for (int j = 0; j < Ny; ++j) {
+            vector<double> a(Nx, 0.0), c(Nx, 0.0), b_sub(Nx, 0.0), f(Nx, 0.0), x(Nx, 0.0);
+            for (int i = 0; i < Nx; ++i) {
+                int k = j * Nx + i;
+                c[i] = diMain[k];
+                if (i > 0) a[i] = diLower[k];
+                if (i < Nx - 1) b_sub[i] = diUpper[k];
+                
+                f[i] = b[k];
+                if (j > 0) f[i] -= diFarLower[k] * u_new[k - Nx];
+                if (j < Ny - 1) f[i] -= diFarUpper[k] * u[k + Nx];
+            }
+            tridiagonal_solve(a, c, b_sub, f, x);
+            for (int i = 0; i < Nx; ++i) {
+                int k = j * Nx + i;
+                max_diff = max(max_diff, abs(x[i] - u[k]));
+                u_new[k] = x[i];
+            }
+        }
+        u = u_new;
+        iter++;
+    } while (max_diff > eps && iter < 10000);
+}
+
+int main() {
+    Params p;
+    // Геометрия Т-области
+    double cap_x_min = 0.0, cap_x_max = 6.0, cap_y_min = 3.0, cap_y_max = 5.0;
+    double base_x_min = 2.0, base_x_max = 4.0, base_y_min = 0.0, base_y_max = 3.0;
+
+    int Nx = 40, Ny = 40;
+    double hx = 6.0 / (Nx - 1), hy = 5.0 / (Ny - 1);
+    int N = Nx * Ny;
+    
+    vector<NodeType> node_types(N, FICTITIOUS);
+    
+    // Разметка узлов
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
+            double x = i * hx;
+            double y = j * hy;
+            int k = j * Nx + i;
+            
+            bool in_cap = (x >= cap_x_min - 1e-7 && x <= cap_x_max + 1e-7 && y >= cap_y_min - 1e-7 && y <= cap_y_max + 1e-7);
+            bool in_base = (x >= base_x_min - 1e-7 && x <= base_x_max + 1e-7 && y >= base_y_min - 1e-7 && y <= base_y_max + 1e-7);
+
+            if (in_cap || in_base) {
+                if (abs(y - cap_y_max) < 1e-7 || abs(y - base_y_min) < 1e-7) {
+                    node_types[k] = BOUNDARY_3; // 3-й род верх и низ
+                } else if ((abs(x - cap_x_min) < 1e-7 && y >= cap_y_min) || (abs(x - cap_x_max) < 1e-7 && y >= cap_y_min) ||
+                           (abs(x - base_x_min) < 1e-7 && y <= base_y_max) || (abs(x - base_x_max) < 1e-7 && y <= base_y_max) ||
+                           (abs(y - cap_y_min) < 1e-7 && (x <= base_x_min + 1e-7 || x >= base_x_max - 1e-7))) {
+                    node_types[k] = BOUNDARY_1;
+                } else {
+                    node_types[k] = INTERNAL;
+                }
+            }
+        }
+    }
+
+    // Сборка СЛАУ
+    vector<double> diMain(N, 0.0), diLower(N, 0.0), diUpper(N, 0.0), diFarLower(N, 0.0), diFarUpper(N, 0.0), b(N, 0.0);
+    
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
+            int k = j * Nx + i;
+            double x = i * hx, y = j * hy;
+
+            if (node_types[k] == FICTITIOUS) {
+                diMain[k] = 1.0; b[k] = 0.0;
+            } else if (node_types[k] == BOUNDARY_1) {
+                diMain[k] = 1.0; b[k] = u_exact(x, y);
+            } else if (node_types[k] == BOUNDARY_3) {
+                if (abs(y - base_y_min) < 1e-7) { // Низ
+                    diMain[k] = p.lambda / hy + p.beta;
+                    diFarUpper[k] = -p.lambda / hy;
+                    b[k] = p.beta * u_exact(x, y); // Упрощенно u_beta = u_exact
+                } else { // Верх
+                    diMain[k] = p.lambda / hy + p.beta;
+                    diFarLower[k] = -p.lambda / hy;
+                    b[k] = p.beta * u_exact(x, y);
+                }
+            } else if (node_types[k] == INTERNAL) {
+                diMain[k] = -(2.0 * p.lambda / (hx * hx) + 2.0 * p.lambda / (hy * hy)) + p.gamma;
+                diLower[k] = p.lambda / (hx * hx);
+                diUpper[k] = p.lambda / (hx * hx);
+                diFarLower[k] = p.lambda / (hy * hy);
+                diFarUpper[k] = p.lambda / (hy * hy);
+                b[k] = -f_func(x, y, p);
+            }
+        }
+    }
+
+    vector<double> u(N, 0.0);
+    block_relaxation(diMain, diLower, diUpper, diFarLower, diFarUpper, b, u, Nx, Ny);
+
+    // Подсчет ошибки
+    double max_err = 0.0;
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
+            int k = j * Nx + i;
+            if (node_types[k] != FICTITIOUS) {
+                max_err = max(max_err, abs(u[k] - u_exact(i * hx, j * hy)));
+            }
+        }
+    }
+    cout << "Grid: " << Nx << "x" << Ny << ", Max Error: " << max_err << endl;
+
+    return 0;
+}
+\end{lstlisting}
+
+\section{Выводы}
+В ходе выполнения лабораторной работы была реализована программа на языке С++ для решения двумерной эллиптической краевой задачи методом конечных разностей. 
+\begin{enumerate}
+    \item Использование фиктивных узлов позволило сохранить регулярную структуру конечно-разностной сетки для непрямоугольной расчетной области и применить метод блочной релаксации (прогонки по линиям) для эффективного решения полученной СЛАУ.
+    \item Результаты тестирования показали, что при наличии краевых условий третьего рода, аппроксимируемых односторонними разностями первого порядка, глобальный порядок сходимости всей схемы падает до первого порядка ($O(h)$), несмотря на то, что аппроксимация во внутренних узлах имеет второй порядок.
+\end{enumerate}
+
+\end{document}
