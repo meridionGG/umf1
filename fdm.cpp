@@ -61,42 +61,50 @@ void applyBoundaryConds(area_t &area, grid_t &grid, slae_t &slae, parameters_t &
             double x = grid.x[i], y = grid.y[j];
             int k = j * n_x + i;
 
-            bool in_cap = (x >= cap_x_min - EPS && x <= cap_x_max + EPS && y >= cap_y_min - EPS && y <= cap_y_max + EPS);
-            bool in_base = (x >= base_x_min - EPS && x <= base_x_max + EPS && y >= base_y_min - EPS && y <= base_y_max + EPS);
+            if (isDummyNode(area, i, j)) continue;
 
-            if (in_cap || in_base) {
-                bool top_bound = (abs(y - cap_y_max) < EPS);
-                bool bottom_bound = (abs(y - base_y_min) < EPS);
-                bool left_cap = (abs(x - cap_x_min) < EPS && y >= cap_y_min - EPS);
-                bool right_cap = (abs(x - cap_x_max) < EPS && y >= cap_y_min - EPS);
-                bool left_base = (abs(x - base_x_min) < EPS && y <= base_y_max + EPS);
-                bool right_base = (abs(x - base_x_max) < EPS && y <= base_y_max + EPS);
-                bool inner_corners = (abs(y - cap_y_min) < EPS && (x <= base_x_min + EPS || x >= base_x_max - EPS));
+            bool top_bound = (abs(y - cap_y_max) < EPS);
+            bool bottom_bound = (abs(y - base_y_min) < EPS);
+            bool left_cap = (abs(x - cap_x_min) < EPS && y >= cap_y_min - EPS);
+            bool right_cap = (abs(x - cap_x_max) < EPS && y >= cap_y_min - EPS);
+            bool left_base = (abs(x - base_x_min) < EPS && y <= base_y_max + EPS);
+            bool right_base = (abs(x - base_x_max) < EPS && y <= base_y_max + EPS);
+            bool inner_corners = (abs(y - cap_y_min) < EPS && (x < base_x_min - EPS || x > base_x_max + EPS));
 
-                if (top_bound) {
-                    double hy = grid.y[j] - grid.y[j - 1];
-                    slae.di[k] = par.lambda / hy + par.beta;
-                    if (k - n_x >= 0) slae.u1[k - n_x] = -par.lambda / hy;
-                    slae.b[k] = par.beta * func.thirdBC[0](x, y);
-                    
-                    if (k - 1 >= 0) slae.u2[k - 1] = 0;
-                    if (k < slae.l4.size()) slae.l4[k] = 0;
-                } else if (bottom_bound) {
-                    double hy = grid.y[j + 1] - grid.y[j];
-                    slae.di[k] = par.lambda / hy + par.beta;
-                    if (k < slae.l5.size()) slae.l5[k] = -par.lambda / hy;
-                    slae.b[k] = par.beta * func.thirdBC[0](x, y);
-                    
-                    if (k - 1 >= 0) slae.u2[k - 1] = 0;
-                    if (k < slae.l4.size()) slae.l4[k] = 0;
-                } else if (left_cap || right_cap || left_base || right_base || inner_corners) {
-                    slae.di[k] = 1.0;
-                    if (k - n_x >= 0) slae.u1[k - n_x] = 0;
-                    if (k - 1 >= 0) slae.u2[k - 1] = 0;
-                    if (k < slae.l4.size()) slae.l4[k] = 0;
-                    if (k < slae.l5.size()) slae.l5[k] = 0;
-                    slae.b[k] = func.firstBC[0](x, y);
-                }
+            if (left_cap || right_cap || left_base || right_base || inner_corners) {
+                // Краевое условие 1-го рода (Дирихле)
+                slae.di[k] = 1.0;
+                if (k - n_x >= 0) slae.u1[k - n_x] = 0;
+                if (k - 1 >= 0) slae.u2[k - 1] = 0;
+                if (k < slae.l4.size()) slae.l4[k] = 0;
+                if (k < slae.l5.size()) slae.l5[k] = 0;
+                slae.b[k] = func.firstBC[0](x, y);
+            } else if (top_bound) {
+                // Краевое условие 3-го рода (Робин) на верхней границе - 2-й порядок
+                double hx1 = grid.x[i] - grid.x[i - 1];
+                double hx2 = grid.x[i + 1] - grid.x[i];
+                double hy = grid.y[j] - grid.y[j - 1];
+                
+                slae.di[k] = par.lambda * (2.0 / (hx1 * hx2) + 2.0 / (hy * hy)) + par.gamma + 2.0 * par.beta / hy;
+                if (k - 1 >= 0) slae.u2[k - 1] = -par.lambda * 2.0 / (hx1 * (hx1 + hx2));
+                if (k < slae.l4.size()) slae.l4[k] = -par.lambda * 2.0 / (hx2 * (hx1 + hx2));
+                if (k - n_x >= 0) slae.u1[k - n_x] = -par.lambda * 2.0 / (hy * hy);
+                
+                slae.b[k] = func.f_rhs(x, y, par) + 2.0 * func.thirdBC[0](x, y) / hy;
+                if (k < slae.l5.size()) slae.l5[k] = 0;
+            } else if (bottom_bound) {
+                // Краевое условие 3-го рода (Робин) на нижней границе - 2-й порядок
+                double hx1 = grid.x[i] - grid.x[i - 1];
+                double hx2 = grid.x[i + 1] - grid.x[i];
+                double hy = grid.y[j + 1] - grid.y[j];
+                
+                slae.di[k] = par.lambda * (2.0 / (hx1 * hx2) + 2.0 / (hy * hy)) + par.gamma + 2.0 * par.beta / hy;
+                if (k - 1 >= 0) slae.u2[k - 1] = -par.lambda * 2.0 / (hx1 * (hx1 + hx2));
+                if (k < slae.l4.size()) slae.l4[k] = -par.lambda * 2.0 / (hx2 * (hx1 + hx2));
+                if (k < slae.l5.size()) slae.l5[k] = -par.lambda * 2.0 / (hy * hy);
+                
+                slae.b[k] = func.f_rhs(x, y, par) + 2.0 * (func.thirdBC.size() > 1 ? func.thirdBC[1](x, y) : func.thirdBC[0](x, y)) / hy;
+                if (k - n_x >= 0) slae.u1[k - n_x] = 0;
             }
         }
     }

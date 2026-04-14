@@ -74,7 +74,7 @@ void method_BlockRelaxation(slae_t &slae, std::vector<double> &u, std::vector<do
             }
         }
         
-        res = sqrt(calcDiscrepancy(slae, u) / norm);
+        res = sqrt(calcDiscrepancy(slae, u)) / norm;
         uk = u;
         iter++;
     }

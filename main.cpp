@@ -83,21 +83,30 @@ int main() {
     f_lin.u_exact = [](double x, double y) { return 2.0 * x + 3.0 * y + 1.0; };
     f_lin.f_rhs = [](double x, double y, parameters_t p) { return p.gamma * (2.0 * x + 3.0 * y + 1.0); };
     f_lin.firstBC = { [](double x, double y) { return 2.0 * x + 3.0 * y + 1.0; } };
-    f_lin.thirdBC = { [](double x, double y) { return 2.0 * x + 3.0 * y + 1.0; } };
+    f_lin.thirdBC = { 
+        [](double x, double y) { return 1.0 * (3.0) + 2.0 * (2.0 * x + 3.0 * y + 1.0); }, // Top: lambda*3 + beta*u
+        [](double x, double y) { return 1.0 * (-3.0) + 2.0 * (2.0 * x + 3.0 * y + 1.0); } // Bottom: lambda*(-3) + beta*u
+    };
 
     // --- Квадратичный полином ---
     functionsBC f_quad;
     f_quad.u_exact = [](double x, double y) { return x * x + y * y; };
     f_quad.f_rhs = [](double x, double y, parameters_t p) { return -p.lambda * 4.0 + p.gamma * (x * x + y * y); };
     f_quad.firstBC = { [](double x, double y) { return x * x + y * y; } };
-    f_quad.thirdBC = { [](double x, double y) { return x * x + y * y; } };
+    f_quad.thirdBC = { 
+        [](double x, double y) { return 1.0 * (2.0 * y) + 2.0 * (x * x + y * y); }, // Top: lambda*2y + beta*u
+        [](double x, double y) { return 1.0 * (-2.0 * y) + 2.0 * (x * x + y * y); } // Bottom: lambda*(-2y) + beta*u
+    };
 
     // --- Синус ---
     functionsBC f_sin;
     f_sin.u_exact = [](double x, double y) { return sin(x + y); };
     f_sin.f_rhs = [](double x, double y, parameters_t p) { return p.lambda * 2.0 * sin(x + y) + p.gamma * sin(x + y); };
     f_sin.firstBC = { [](double x, double y) { return sin(x + y); } };
-    f_sin.thirdBC = { [](double x, double y) { return sin(x + y); } };
+    f_sin.thirdBC = { 
+        [](double x, double y) { return 1.0 * (cos(x + y)) + 2.0 * (sin(x + y)); }, // Top: lambda*cos + beta*u
+        [](double x, double y) { return 1.0 * (-cos(x + y)) + 2.0 * (sin(x + y)); } // Bottom: lambda*(-cos) + beta*u
+    };
 
 
     std::cout << "---------------------------------------------------------\n";
