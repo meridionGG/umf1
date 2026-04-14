@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.10)
+
+project(FDM_Solver)
+
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_executable(FDM_Solver main.cpp fdm.cpp input.cpp sor.cpp)
+
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/in DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/out DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
